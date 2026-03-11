@@ -1,39 +1,54 @@
 import cv2
+import time
 from hand_tracker import HandTracker
 from alphabet_recorder import AlphabetRecorder
+from gesture_recognizer import GestureRecognizer
 
 tracker = HandTracker()
-cap = cv2.VideoCapture(0)
 recorder = AlphabetRecorder()
+recognizer = GestureRecognizer()
+
+cap = cv2.VideoCapture(0)
+translated_text = ""
+last_committed_label = None
+last_commit_time = 0.0
+commit_cooldown_seconds = 1.2
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    # 🔹 1. 모델에는 원본 frame
+    frame = cv2.flip(frame, 1)
+
     hands = tracker.get_hands(frame)
-
-    # 🔹 2. 화면 표시용은 flip
-    display = cv2.flip(frame, 1)
-
-    tracker.draw(display)
-
-    cv2.imshow("Hand", display)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-    
-
     recorder.add_frame(hands)
+    predicted_label, score, is_stable = recognizer.update(hands)
 
-    display = cv2.flip(frame, 1)
-    hands = tracker.get_hands(display)
-    recorder.add_frame(hands)
-    tracker.draw(display)
+    if is_stable:
+        now = time.time()
+        if predicted_label != last_committed_label or (now - last_commit_time) > commit_cooldown_seconds:
+            translated_text += predicted_label
+            last_committed_label = predicted_label
+            last_commit_time = now
 
-    cv2.imshow("ASL Recorder", display)
+    tracker.draw(frame)
+
+    samples_loaded = len(recognizer.templates)
+    score_text = "--" if score is None else f"{score:.2f}"
+    predicted_text = predicted_label or "-"
+
+    cv2.rectangle(frame, (10, 10), (630, 140), (0, 0, 0), -1)
+    cv2.putText(frame, f"Prediction: {predicted_text}", (20, 45),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+    cv2.putText(frame, f"Score: {score_text}  Samples: {samples_loaded}", (20, 75),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    cv2.putText(frame, f"Text: {translated_text[-24:]}", (20, 110),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    cv2.putText(frame, "r=start s=stop c=clear backspace=delete q=quit", (20, 132),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+
+    cv2.imshow("ASL Recorder", frame)
 
     key = cv2.waitKey(1) & 0xFF
 
@@ -43,8 +58,14 @@ while True:
         label = input("Enter alphabet label (A-Z): ").upper()
         recorder.start(label)
     elif key == ord('s'):
-       recorder.stop()
+        recorder.stop()
+        recognizer.reload()
+    elif key == ord('c'):
+        translated_text = ""
+        last_committed_label = None
+    elif key in (8, 127):
+        translated_text = translated_text[:-1]
+        last_committed_label = None
 
 cap.release()
 cv2.destroyAllWindows()
-

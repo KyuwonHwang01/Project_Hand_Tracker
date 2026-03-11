@@ -9,9 +9,13 @@ class AlphabetRecorder:
         self.label = None
 
     def start(self, label):
+        if not label or not label.strip():
+            print("[REC] Recording skipped: empty label")
+            return
+
         self.recording = True
         self.frames = []
-        self.label = label
+        self.label = label.strip().upper()
         print(f"[REC] Recording started for: {label}")
 
     def stop(self):
